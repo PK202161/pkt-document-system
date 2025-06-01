@@ -16,7 +16,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     try {
       console.log('Attempting login...', values);
       
-      const response = await axios.post('http://localhost:3004/api/auth/login', values);
+      const response = await axios.post('http:/localhost:3004/api/auth/login', values);
       
       console.log('Login successful:', response.data);
       
