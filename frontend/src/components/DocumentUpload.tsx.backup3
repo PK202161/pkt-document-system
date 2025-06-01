@@ -1,0 +1,496 @@
+import React, { useState } from 'react';
+import {
+  Upload,
+  Card,
+  Button,
+  Select,
+  Progress,
+  Alert,
+  Typography,
+  Space,
+  Row,
+  Col,
+  message,
+  List,
+  Tag,
+  Divider,
+  Steps,
+  Result
+} from 'antd';
+import {
+  InboxOutlined,
+  UploadOutlined,
+  FileTextOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  ArrowRightOutlined,
+  ClockCircleOutlined
+} from '@ant-design/icons';
+import type { UploadProps, UploadFile } from 'antd';
+import axios from 'axios';
+
+const { Dragger } = Upload;
+const { Option } = Select;
+const { Title, Text } = Typography;
+const { Step } = Steps;
+
+interface UploadResponse {
+  success: boolean;
+  message: string;
+  document?: {
+    id: number;
+    docNumber: string;
+    docType: string;
+    fileName: string;
+  };
+}
+
+interface ProcessedFile {
+  file: UploadFile;
+  status: 'waiting' | 'uploading' | 'success' | 'error';
+  result?: UploadResponse;
+  progress: number;
+}
+
+const DocumentUpload: React.FC = () => {
+  const [docType, setDocType] = useState<string>('SO');
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
+  const [currentUploadIndex, setCurrentUploadIndex] = useState<number>(-1);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const uploadProps: UploadProps = {
+    name: 'xmlFile',
+    multiple: true,
+    accept: '.xml',
+    fileList,
+    onChange: (info) => {
+      setFileList(info.fileList);
+    },
+    onRemove: (file) => {
+      const index = fileList.indexOf(file);
+      const newFileList = fileList.slice();
+      newFileList.splice(index, 1);
+      setFileList(newFileList);
+      
+      // Remove from processed files too
+      setProcessedFiles(prev => 
+        prev.filter(pf => pf.file.uid !== file.uid)
+      );
+    },
+    beforeUpload: (file) => {
+      // Validate file type
+      const isXML = file.type === 'text/xml' || file.name.toLowerCase().endsWith('.xml');
+      if (!isXML) {
+        message.error(`${file.name} ไม่ใช่ไฟล์ XML`);
+        return false;
+      }
+
+      // Validate file size (5MB max)
+      const isLt5M = file.size / 1024 / 1024 < 5;
+      if (!isLt5M) {
+        message.error(`${file.name} ขนาดไฟล์ต้องไม่เกิน 5MB`);
+        return false;
+      }
+
+      return false; // Prevent auto upload
+    },
+    onDrop(e) {
+      console.log('Dropped files', e.dataTransfer.files);
+    },
+  };
+
+  const handleStartProcessing = async () => {
+    if (fileList.length === 0) {
+      message.warning('กรุณาเลือกไฟล์ XML');
+      return;
+    }
+
+    setIsProcessing(true);
+    setCurrentUploadIndex(0);
+    
+    // Initialize processed files
+    const initialProcessed: ProcessedFile[] = fileList.map(file => ({
+      file,
+      status: 'waiting',
+      progress: 0
+    }));
+    setProcessedFiles(initialProcessed);
+
+    // Process files one by one
+    for (let i = 0; i < fileList.length; i++) {
+      setCurrentUploadIndex(i);
+      await uploadSingleFile(fileList[i], i);
+      
+      // Small delay between uploads for better UX
+      if (i < fileList.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    setIsProcessing(false);
+    setCurrentUploadIndex(-1);
+    
+    const successCount = processedFiles.filter(pf => pf.status === 'success').length;
+    const failCount = processedFiles.filter(pf => pf.status === 'error').length;
+    
+    message.success(`การประมวลผลเสร็จสิ้น: สำเร็จ ${successCount} ไฟล์, ล้มเหลว ${failCount} ไฟล์`);
+  };
+
+  const uploadSingleFile = async (file: UploadFile, index: number): Promise<void> => {
+    // Update status to uploading
+    setProcessedFiles(prev => prev.map((pf, i) => 
+      i === index ? { ...pf, status: 'uploading', progress: 0 } : pf
+    ));
+
+    try {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      const formData = new FormData();
+      formData.append('xmlFile', file.originFileObj as File);
+      formData.append('docType', docType);
+
+      const response = await axios.post<UploadResponse>(
+        'http://localhost:3004/api/documents/upload',
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / (progressEvent.total || 1)
+            );
+            
+            setProcessedFiles(prev => prev.map((pf, i) => 
+              i === index ? { ...pf, progress: percentCompleted } : pf
+            ));
+          },
+        }
+      );
+
+      if (response.data.success) {
+        setProcessedFiles(prev => prev.map((pf, i) => 
+          i === index ? { 
+            ...pf, 
+            status: 'success', 
+            progress: 100,
+            result: response.data 
+          } : pf
+        ));
+        
+        message.success(`${file.name} อัปโหลดสำเร็จ`);
+      } else {
+        throw new Error(response.data.message);
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      
+      setProcessedFiles(prev => prev.map((pf, i) => 
+        i === index ? { 
+          ...pf, 
+          status: 'error', 
+          progress: 0,
+          result: { 
+            success: false, 
+            message: error.response?.data?.message || 'อัปโหลดไม่สำเร็จ' 
+          }
+        } : pf
+      ));
+      
+      const errorMessage = error.response?.data?.message || 'เกิดข้อผิดพลาดในการอัปโหลด';
+      message.error(`${file.name}: ${errorMessage}`);
+    }
+  };
+
+  const clearAll = () => {
+    setFileList([]);
+    setProcessedFiles([]);
+    setCurrentUploadIndex(-1);
+    setIsProcessing(false);
+  };
+
+  const getDocTypeColor = (type: string) => {
+    switch (type) {
+      case 'SO': return '#1890ff';
+      case 'EN': return '#52c41a';
+      case 'SH': return '#fa8c16';
+      default: return '#d9d9d9';
+    }
+  };
+
+  const getDocTypeLabel = (type: string) => {
+    switch (type) {
+      case 'SO': return 'Sales Order';
+      case 'EN': return 'Enterprise';
+      case 'SH': return 'Shipment';
+      default: return type;
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const getStepStatus = (index: number) => {
+    if (index < currentUploadIndex) return 'finish';
+    if (index === currentUploadIndex) return 'process';
+    return 'wait';
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <Row style={{ marginBottom: 24 }}>
+        <Col span={24}>
+          <Title level={2} style={{ marginBottom: 8 }}>
+            📤 อัปโหลดเอกสาร XML (ทีละไฟล์)
+          </Title>
+          <Alert
+            message="การประมวลผลแบบ Sequential"
+            description="เอกสารจะถูกประมวลผลทีละไฟล์เพื่อรักษาความสัมพันธ์ของข้อมูลแบบ 1:1"
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        </Col>
+      </Row>
+
+      {/* Upload Configuration */}
+      <Card 
+        title={
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <UploadOutlined style={{ marginRight: 8, color: '#1890ff' }} />
+            การตั้งค่าการอัปโหลด
+          </div>
+        }
+        style={{ marginBottom: 24 }}
+        size="small"
+      >
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={8}>
+            <Space>
+              <Text strong>ประเภทเอกสาร:</Text>
+              <Select
+                value={docType}
+                onChange={setDocType}
+                style={{ width: 200 }}
+                disabled={isProcessing}
+              >
+                <Option value="SO">
+                  <Tag color={getDocTypeColor('SO')}>SO - Sales Order</Tag>
+                </Option>
+                <Option value="EN">
+                  <Tag color={getDocTypeColor('EN')}>EN - Enterprise</Tag>
+                </Option>
+                <Option value="SH">
+                  <Tag color={getDocTypeColor('SH')}>SH - Shipment</Tag>
+                </Option>
+              </Select>
+            </Space>
+          </Col>
+          <Col xs={24} sm={12} md={16}>
+            <Space>
+              <Button
+                type="primary"
+                icon={<ArrowRightOutlined />}
+                onClick={handleStartProcessing}
+                loading={isProcessing}
+                disabled={fileList.length === 0}
+                size="large"
+              >
+                {isProcessing ? 'กำลังประมวลผล...' : `เริ่มประมวลผล ${fileList.length} ไฟล์`}
+              </Button>
+              {fileList.length > 0 && (
+                <Button
+                  icon={<DeleteOutlined />}
+                  onClick={clearAll}
+                  disabled={isProcessing}
+                >
+                  ล้างทั้งหมด
+                </Button>
+              )}
+            </Space>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Upload Area */}
+      <Card
+        title={
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <InboxOutlined style={{ marginRight: 8, color: '#1890ff' }} />
+            เลือกไฟล์ XML
+          </div>
+        }
+        style={{ marginBottom: 24 }}
+      >
+        <Dragger {...uploadProps} style={{ padding: '40px 20px' }} disabled={isProcessing}>
+          <p className="ant-upload-drag-icon">
+            <InboxOutlined style={{ fontSize: 48, color: isProcessing ? '#d9d9d9' : '#1890ff' }} />
+          </p>
+          <p className="ant-upload-text" style={{ fontSize: 16 }}>
+            {isProcessing ? 'กำลังประมวลผล...' : 'ลากไฟล์ XML มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์'}
+          </p>
+          <p className="ant-upload-hint" style={{ color: '#999' }}>
+            รองรับไฟล์ XML เท่านั้น ขนาดไม่เกิน 5MB ต่อไฟล์ • ประมวลผลทีละไฟล์
+          </p>
+        </Dragger>
+      </Card>
+
+      {/* Processing Status */}
+      {isProcessing && processedFiles.length > 0 && (
+        <Card 
+          title="🔄 สถานะการประมวลผล"
+          style={{ marginBottom: 24 }}
+        >
+          <Steps
+            direction="vertical"
+            size="small"
+            current={currentUploadIndex}
+          >
+            {processedFiles.map((pf, index) => (
+              <Step
+                key={pf.file.uid}
+                title={pf.file.name}
+                description={
+                  <div>
+                    <Text type="secondary">
+                      {formatFileSize(pf.file.size || 0)} • {getDocTypeLabel(docType)}
+                    </Text>
+                    {pf.status === 'uploading' && (
+                      <Progress 
+                        percent={pf.progress} 
+                        size="small" 
+                        style={{ marginTop: 4 }}
+                      />
+                    )}
+                    {pf.status === 'success' && pf.result && (
+                      <Text type="success" style={{ display: 'block', fontSize: '12px' }}>
+                        ✅ {pf.result.message}
+                      </Text>
+                    )}
+                    {pf.status === 'error' && pf.result && (
+                      <Text type="danger" style={{ display: 'block', fontSize: '12px' }}>
+                        ❌ {pf.result.message}
+                      </Text>
+                    )}
+                  </div>
+                }
+                status={
+                  pf.status === 'success' ? 'finish' :
+                  pf.status === 'error' ? 'error' :
+                  pf.status === 'uploading' ? 'process' : 'wait'
+                }
+                icon={
+                  pf.status === 'waiting' ? <ClockCircleOutlined /> :
+                  pf.status === 'uploading' ? <UploadOutlined /> :
+                  pf.status === 'success' ? <CheckCircleOutlined /> :
+                  <ExclamationCircleOutlined />
+                }
+              />
+            ))}
+          </Steps>
+        </Card>
+      )}
+
+      {/* Results Summary */}
+      {!isProcessing && processedFiles.length > 0 && (
+        <Card title="📊 สรุปผลการประมวลผล">
+          <Row gutter={[16, 16]}>
+            <Col xs={8}>
+              <Card size="small">
+                <div style={{ textAlign: 'center' }}>
+                  <Text type="secondary">ทั้งหมด</Text>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
+                    {processedFiles.length}
+                  </div>
+                </div>
+              </Card>
+            </Col>
+            <Col xs={8}>
+              <Card size="small">
+                <div style={{ textAlign: 'center' }}>
+                  <Text type="secondary">สำเร็จ</Text>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#52c41a' }}>
+                    {processedFiles.filter(pf => pf.status === 'success').length}
+                  </div>
+                </div>
+              </Card>
+            </Col>
+            <Col xs={8}>
+              <Card size="small">
+                <div style={{ textAlign: 'center' }}>
+                  <Text type="secondary">ล้มเหลว</Text>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f5222d' }}>
+                    {processedFiles.filter(pf => pf.status === 'error').length}
+                  </div>
+                </div>
+              </Card>
+            </Col>
+          </Row>
+
+          {processedFiles.filter(pf => pf.status === 'success').length === processedFiles.length && (
+            <Result
+              status="success"
+              title="ประมวลผลเสร็จสิ้น!"
+              subTitle={`อัปโหลดเอกสาร ${processedFiles.length} ไฟล์สำเร็จทั้งหมด`}
+              style={{ marginTop: 24 }}
+            />
+          )}
+        </Card>
+      )}
+
+      {/* Help Information */}
+      <Card 
+        title="📚 ข้อมูลการใช้งาน" 
+        size="small"
+        style={{ marginTop: 24 }}
+      >
+        <Row gutter={[16, 16]}>
+          <Col xs={24} md={12}>
+            <Title level={5}>🔄 การประมวลผลแบบ Sequential:</Title>
+            <ul style={{ paddingLeft: 20 }}>
+              <li>ไฟล์จะถูกประมวลผลทีละไฟล์</li>
+              <li>รักษาความสัมพันธ์ของข้อมูลแบบ 1:1</li>
+              <li>ป้องกันปัญหา data conflict</li>
+              <li>ติดตามความคืบหน้าได้แบบ real-time</li>
+            </ul>
+          </Col>
+          <Col xs={24} md={12}>
+            <Title level={5}>📋 ประเภทเอกสาร:</Title>
+            <Space direction="vertical">
+              {['SO', 'EN', 'SH'].map(type => (
+                <Space key={type} align="start">
+                  <div style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 4,
+                    backgroundColor: getDocTypeColor(type),
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontSize: '12px',
+                    fontWeight: 'bold'
+                  }}>
+                    {type}
+                  </div>
+                  <Text>{getDocTypeLabel(type)}</Text>
+                </Space>
+              ))}
+            </Space>
+          </Col>
+        </Row>
+      </Card>
+    </div>
+  );
+};
+
+export default DocumentUpload;
