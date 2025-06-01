@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  pkt_postgres:
+    image: postgres:15
+    container_name: pkt_postgres_db
+    environment:
+      POSTGRES_DB: pkt_document_db
+      POSTGRES_USER: pkt_user
+      POSTGRES_PASSWORD: pkt_password_123
+    ports:
+      - "5433:5432"  # ใช้ port 5433 ไม่ซ้ำกับ N8N
+    volumes:
+      - pkt_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  pkt_postgres_data:

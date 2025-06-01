@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<salesOrder>
+  <docNumber>SO2025001</docNumber>
+  <customer>PKT Company</customer>
+  <date>2025-05-31</date>
+  <items>
+    <item id="1">Product A</item>
+    <item id="2">Product B</item>
+  </items>
+</salesOrder>

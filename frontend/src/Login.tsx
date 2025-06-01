@@ -1,0 +1,125 @@
+import React, { useState } from 'react';
+import { Card, Form, Input, Button, message, Space } from 'antd';
+import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import axios from 'axios';
+
+// Define props interface
+interface LoginProps {
+  onLoginSuccess?: () => void;
+}
+
+const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+  const [loading, setLoading] = useState(false);
+
+  const onFinish = async (values: { username: string; password: string }) => {
+    setLoading(true);
+    try {
+      console.log('Attempting login...', values);
+      
+      const response = await axios.post('http://172.16.2.12:3004/api/auth/login', values);
+      
+      console.log('Login successful:', response.data);
+      
+      // เก็บ token
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+      
+      message.success('เข้าสู่ระบบสำเร็จ!');
+      
+      // Call onLoginSuccess callback if provided
+      if (onLoginSuccess) {
+        onLoginSuccess();
+      } else {
+        // Fallback: refresh page
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      }
+      
+    } catch (error: any) {
+      console.error('Login error:', error);
+      const errorMessage = error.response?.data?.message || error.message || 'เข้าสู่ระบบไม่สำเร็จ';
+      message.error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ทดสอบการเชื่อมต่อ Backend
+  const testBackend = async () => {
+    try {
+      const response = await axios.get('http://172.16.2.12:3004/api/auth/test');
+      message.success('Backend เชื่อมต่อได้!');
+      console.log('Backend test:', response.data);
+    } catch (error) {
+      console.error('Backend test failed:', error);
+      message.error('ไม่สามารถเชื่อมต่อ Backend ได้ - ตรวจสอบว่า Backend รันอยู่ที่ port 3004');
+    }
+  };
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      minHeight: '100vh', 
+      background: '#f0f2f5' 
+    }}>
+      <Card title="🔐 เข้าสู่ระบบ PKT" style={{ width: 400 }}>
+        <Form
+          name="login"
+          onFinish={onFinish}
+          layout="vertical"
+          size="large"
+          initialValues={{
+            username: 'admin',
+            password: 'admin123'
+          }}
+        >
+          <Form.Item
+            name="username"
+            rules={[{ required: true, message: 'กรุณาใส่ชื่อผู้ใช้' }]}
+          >
+            <Input prefix={<UserOutlined />} placeholder="ชื่อผู้ใช้" />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            rules={[{ required: true, message: 'กรุณาใส่รหัสผ่าน' }]}
+          >
+            <Input.Password prefix={<LockOutlined />} placeholder="รหัสผ่าน" />
+          </Form.Item>
+
+          <Form.Item>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={loading} 
+                block
+                size="large"
+              >
+                เข้าสู่ระบบ
+              </Button>
+              
+              <Button 
+                type="default" 
+                onClick={testBackend}
+                block
+              >
+                ทดสอบ Backend
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+
+        <div style={{ marginTop: 16, fontSize: 12, color: '#999', textAlign: 'center' }}>
+          ทดสอบ: admin / admin123<br/>
+          Backend: http://172.16.2.12:3004
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+export default Login;
